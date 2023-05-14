@@ -1,0 +1,2 @@
+# fren
+AI companion
