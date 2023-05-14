@@ -1,0 +1,13 @@
+replicate
+openai
+numpy
+arxiv
+google-api-python-client
+notion-client
+discord.py
+Pillow
+gradio
+PyGithub
+transformers
+torchvision
+pymupdf
