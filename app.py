@@ -1,9 +1,5 @@
-import datetime
 import logging
 import os
-import random
-import re
-import time
 import uuid
 from io import BytesIO
 from typing import Dict, List, Union
@@ -11,7 +7,6 @@ from typing import Dict, List, Union
 import gradio as gr
 import openai
 import requests
-import torch
 from PIL import Image
 
 logging.basicConfig(level=logging.INFO)
@@ -49,18 +44,6 @@ def set_openai_key(key=None):
     openai.api_key = key
     log.info("OpenAI API key set.")
 
-def set_google_key(key=None):
-    if key is None:
-        try:
-            with open(os.path.join(KEYS_DIR, "google.txt"), "r") as f:
-                key = f.read()
-        except FileNotFoundError:
-            log.warning("Google API key not found.")
-            return
-    os.environ["GOOGLE_API_KEY"] = key
-    log.info("Google API key set.")
-
-
 def set_huggingface_key(key=None):
     if key is None:
         try:
@@ -73,40 +56,8 @@ def set_huggingface_key(key=None):
     log.info("HuggingFace API key set.")
 
 
-def segment_segformer(
-    text,
-    image,
-    model_name="nvidia/segformer-b2-finetuned-cityscapes-1024-1024",
-):
-    from transformers import SegformerForSemanticSegmentation, SegformerImageProcessor
-
-    processor = SegformerImageProcessor.from_pretrained(model_name)
-    model = SegformerForSemanticSegmentation.from_pretrained(model_name)
-
-    image = Image.fromarray(image)
-    with torch.no_grad():
-        inputs = processor(images=image, return_tensors="pt")
-        outputs = model(**inputs)
-
-    # Predicted mask with class indices
-    class_mask = outputs.logits.argmax(1)
-
-    # Get all the unique classes, and their name
-    class_ids = torch.unique(class_mask)
-    class_names = [model.config.id2label[x.item()] for x in class_ids]
-
-    if text in class_names:
-        class_id = model.config.label2id[text]
-        mask = class_mask == class_id
-        mask = mask.squeeze().cpu().numpy()
-        mask = mask.astype("uint8") * 255
-        mask = Image.fromarray(mask)
-        mask = mask.resize(image.size)
-
-        # Apply mask to image
-        image = Image.composite(image, mask, mask)
-        return image, ",".join(class_names)
-    return image, ",".join(class_names)
+def imagebind():
+    pass
 
 
 def gpt_text(
@@ -216,16 +167,8 @@ with gr.Blocks() as demo:
 """
     )
     log.info("Starting GradIO Frontend ...")
-    texts_text = gr.State(
-        value="""Like 👍. Comment 💬. Subscribe 🟥.
-🏘 Discord: https://discord.gg/XKgVSxB6dE
-"""
-    )
     texts_references = gr.State(value="")
     with gr.Tab("Texts"):
-        # TODO: Scrape information from paper sources
-        # TODO: List/recommend specific paper sources
-        # TODO: Accept any text and then parse it.
         gr_input_textbox = gr.Textbox(
             placeholder="Paste text here (arxiv, github, ...)",
             show_label=False,
@@ -253,70 +196,7 @@ with gr.Blocks() as demo:
                 value=0.7,
                 label="Temperature",
             )
-        with gr.Row():
-            gr_texts_title_button = gr.Button(value="Make Title")
-            gr_texts_title_textbox = gr.Textbox(show_label=False)
-            gr_texts_title_button.click(
-                generate_texts_title,
-                inputs=[
-                    gr_texts_title_textbox,
-                    gr_max_tokens,
-                    gr_temperature,
-                    gr_model,
-                ],
-                outputs=[gr_texts_title_textbox],
-            )
-        with gr.Row():
-            gr_texts_hashtags_button = gr.Button(value="Make Hashtags")
-            gr_texts_hashtags_textbox = gr.Textbox(show_label=False)
-            gr_texts_hashtags_button.click(
-                generate_texts_hashtags,
-                inputs=[
-                    gr_texts_title_textbox,
-                    gr_texts_hashtags_textbox,
-                    gr_max_tokens,
-                    gr_temperature,
-                    gr_model,
-                ],
-                outputs=[gr_texts_hashtags_textbox],
-            )
-        gr_input_textbox.change(
-            parse_textbox,
-            inputs=[gr_input_textbox],
-            outputs=[
-                texts_references,
-                gr_texts_hashtags_textbox,
-                gr_texts_title_textbox,
-            ],
-        )
-        gr_generate_texts_button = gr.Button(value="Combine")
-        gr_texts_textbox = gr.Textbox(label="Copy Paste into YouTube")
-        gr_generate_texts_button.click(
-            combine_texts,
-            inputs=[
-                texts_text,
-                texts_references,
-                gr_texts_hashtags_textbox,
-            ],
-            outputs=[gr_texts_textbox],
-        )
-    with gr.Tab("Thumbnail"):
-        gr_bg_image = gr.Image(
-            label="Background",
-            image_mode="RGB",
-        )
-        with gr.Accordion(label="Extract Images from PDF", open=False):
-            gr_extracted_images_gallery = gr.Gallery(
-                label="Extracted Images",
-                image_mode="RGB",
-            )
-            gr_extract_images_button = gr.Button(value="Extract Images")
-            gr_extract_images_button.click(
-                extract_images_from_pdf,
-                inputs=[gr_input_textbox],
-                outputs=[gr_extracted_images_gallery],
-            )
-        with gr.Accordion(label="Generate Foreground w/ OpenAI Image", open=False):
+        with gr.Accordion(label="Generate Image w/ OpenAI Image", open=False):
             with gr.Row():
                 gr_fg_image = gr.Image(
                     label="Foreground",
@@ -335,94 +215,6 @@ with gr.Blocks() as demo:
                 inputs=[gr_fg_prompt_textbox],
                 outputs=[gr_fg_image],
             )
-        with gr.Accordion(label="Remove Background with Replicate", open=False):
-            with gr.Row():
-                gr_mask_image = gr.Image(
-                    label="Foreground Mask",
-                    image_mode="L",
-                )
-                with gr.Column():
-                    gr_make_mask_button = gr.Button(value="Make Mask")
-            gr_make_mask_button.click(
-                remove_bg,
-                inputs=[gr_fg_image],
-                outputs=[gr_mask_image],
-            )
-        with gr.Accordion(label="Segment with Segformer", open=False):
-            with gr.Row():
-                gr_segment_image = gr.Image(
-                    label="Image to Segment",
-                    image_mode="RGB",
-                )
-                with gr.Column():
-                    gr_segment_button = gr.Button(value="Segment")
-                    gr_segment_textbox = gr.Textbox(
-                        placeholder="Class Name",
-                        show_label=False,
-                        lines=1,
-                    )
-                    gr_segment_out_textbox = gr.Textbox(
-                        placeholder="Found Classes",
-                        show_label=False,
-                        lines=4,
-                    )
-            gr_segment_button.click(
-                segment_segformer,
-                inputs=[gr_segment_textbox, gr_segment_image],
-                outputs=[gr_segment_image, gr_segment_out_textbox],
-            )
-        with gr.Row():
-            gr_combine_button = gr.Button(value="Make Thumbnail")
-            with gr.Accordion(
-                label="Text Settings",
-                open=False,
-            ):
-                with gr.Row():
-                    gr_rect_color = gr.ColorPicker(
-                        label="Rectangle Color",
-                        value="#64dbf1",
-                    )
-                    gr_font_color = gr.ColorPicker(
-                        label="Text Color",
-                        value="#000000",
-                    )
-                gr_font_path = gr.File(
-                    label="Font",
-                    value=os.path.join(DATA_DIR, "RobotoMono-SemiBold.ttf"),
-                )
-                gr_font_size = gr.Slider(
-                    minimum=50,
-                    maximum=120,
-                    value=92,
-                    label="Font Size",
-                    step=1,
-                )
-                gr_rect_padding = gr.Slider(
-                    minimum=0,
-                    maximum=100,
-                    value=10,
-                    label="Rectangle Padding",
-                    step=1,
-                )
-        gr_combined_image = gr.Image(
-            label="Combined",
-            image_mode="RGB",
-        )
-        gr_combine_button.click(
-            generate_thumbnails,
-            inputs=[
-                gr_fg_image,
-                gr_mask_image,
-                gr_bg_image,
-                gr_texts_title_textbox,
-                gr_font_color,
-                gr_font_path,
-                gr_font_size,
-                gr_rect_color,
-                gr_rect_padding,
-            ],
-            outputs=[gr_combined_image],
-        )
     with gr.Tab("Keys"):
         openai_api_key_textbox = gr.Textbox(
             placeholder="Paste your OpenAI API key here",
@@ -453,7 +245,7 @@ with gr.Blocks() as demo:
         Author: <a href="https://youtube.com/@hu-po">Hu Po</a>
         GitHub: <a href="https://github.com/hu-po/fren">fren</a>
         <br>
-        <a href="https://huggingface.co/spaces/hu-po/speech2speech?duplicate=true">
+        <a href="https://huggingface.co/spaces/hu-po/fren?duplicate=true">
         <img src="https://bit.ly/3gLdBN6" alt="Duplicate Space"></a>
         </center>
         """
