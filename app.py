@@ -22,7 +22,7 @@ from notion_client import Client
 from PIL import Image, ImageDraw, ImageFont
 
 logging.basicConfig(level=logging.INFO)
-log = logging.getLogger("tubegpt")
+log = logging.getLogger("fren")
 # Set formatting
 formatter = logging.Formatter("📺|%(asctime)s|%(message)s")
 # Set up console handler
@@ -31,7 +31,7 @@ ch.setLevel(logging.INFO)
 ch.setFormatter(formatter)
 log.addHandler(ch)
 # Set up file handler
-fh = logging.FileHandler("tubegpt.log")
+fh = logging.FileHandler("fren.log")
 fh.setLevel(logging.DEBUG)
 fh.setFormatter(formatter)
 log.addHandler(fh)
@@ -696,7 +696,7 @@ def generate_thumbnails(
 with gr.Blocks() as demo:
     gr.Markdown(
         """
-# TubeGPT 📺
+# fren 📺
 
 This AI tool helps you create YouTube videos. Start by finding a cool paper [Twitter List](https://twitter.com/i/lists/1653485531546767361), [PapersWithCode](https://paperswithcode.com/), [Reddit Feed](https://www.reddit.com/user/deephugs/m/ml/), [Arxiv Sanity](http://www.arxiv-sanity.com/)
 """
@@ -981,7 +981,7 @@ This AI tool helps you create YouTube videos. Start by finding a cool paper [Twi
         """
         <center>
         Author: <a href="https://youtube.com/@hu-po">Hu Po</a>
-        GitHub: <a href="https://github.com/hu-po/TubeGPT">TubeGPT</a>
+        GitHub: <a href="https://github.com/hu-po/fren">fren</a>
         <br>
         <a href="https://huggingface.co/spaces/hu-po/speech2speech?duplicate=true">
         <img src="https://bit.ly/3gLdBN6" alt="Duplicate Space"></a>
