@@ -1,7 +1,9 @@
 import logging
 import os
+import sys
 import uuid
 from io import BytesIO
+import torch
 from typing import Dict, List, Union
 
 import gradio as gr
@@ -57,6 +59,16 @@ def set_huggingface_key(key=None):
 
 
 def imagebind():
+    sys.path.append('/home/oop/dev/ImageBind')
+    from models import imagebind_model
+    from models.imagebind_model import ModalityType
+    device = "cuda:0" if torch.cuda.is_available() else "cpu"
+
+    # Instantiate model
+    model = imagebind_model.imagebind_huge(pretrained=True)
+    model.eval()
+    model.to(device)
+
     pass
 
 
@@ -252,4 +264,5 @@ with gr.Blocks() as demo:
     )
 
 if __name__ == "__main__":
-    demo.launch()
+    # demo.launch()
+    imagebind()
