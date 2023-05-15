@@ -8,23 +8,15 @@ import uuid
 from io import BytesIO
 from typing import Dict, List, Union
 
-import arxiv
-import discord
-import fitz  # PyMuPDF
 import gradio as gr
 import openai
-import replicate
 import requests
 import torch
-from googleapiclient.discovery import build
-from googleapiclient.errors import HttpError
-from notion_client import Client
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("fren")
-# Set formatting
-formatter = logging.Formatter("📺|%(asctime)s|%(message)s")
+formatter = logging.Formatter("🤖|%(asctime)s|%(message)s")
 # Set up console handler
 ch = logging.StreamHandler()
 ch.setLevel(logging.INFO)
@@ -45,30 +37,6 @@ os.makedirs(DATA_DIR, exist_ok=True)
 log.info(f"DATA_DIR: {DATA_DIR}")
 
 
-def set_discord_key(key=None):
-    if key is None:
-        try:
-            with open(os.path.join(KEYS_DIR, "discord.txt"), "r") as f:
-                key = f.read()
-        except FileNotFoundError:
-            log.warning("Discord API key not found.")
-            return
-    os.environ["DISCORD_API_KEY"] = key
-    log.info("Discord API key set.")
-
-
-def set_replicate_key(key=None):
-    if key is None:
-        try:
-            with open(os.path.join(KEYS_DIR, "replicate.txt"), "r") as f:
-                key = f.read()
-        except FileNotFoundError:
-            log.warning("Replicate API key not found.")
-            return
-    os.environ["REPLICATE_API_TOKEN"] = key
-    log.info("Replicate API key set.")
-
-
 def set_openai_key(key=None):
     if key is None:
         try:
@@ -80,19 +48,6 @@ def set_openai_key(key=None):
     os.environ["OPENAI_API_KEY"] = key
     openai.api_key = key
     log.info("OpenAI API key set.")
-
-
-def set_notion_key(key=None):
-    if key is None:
-        try:
-            with open(os.path.join(KEYS_DIR, "notion.txt"), "r") as f:
-                key = f.read()
-        except FileNotFoundError:
-            log.warning("Notion API key not found.")
-            return
-    os.environ["NOTION_API_KEY"] = key
-    log.info("Notion API key set.")
-
 
 def set_google_key(key=None):
     if key is None:
@@ -152,134 +107,6 @@ def segment_segformer(
         image = Image.composite(image, mask, mask)
         return image, ",".join(class_names)
     return image, ",".join(class_names)
-
-
-def find_paper(url: str) -> arxiv.Result:
-    pattern = r"arxiv\.org\/(?:abs|pdf)\/(\d+\.\d+)"
-    match = re.search(pattern, url)
-    if match:
-        arxiv_id = match.group(1)
-        search = arxiv.Search(id_list=[arxiv_id])
-        paper = next(search.results())
-        return paper
-    else:
-        return None
-
-
-def find_repo(url: str) -> arxiv.Result:
-    pattern = r"github.com/([^/]+)/([^/]+)"
-    match = re.search(pattern, url)
-    if match:
-        usr = match.group(0)
-        repo = match.group(1)
-        return usr, repo
-    else:
-        return None
-
-
-def get_video_info(video_id):
-    if not video_id:
-        return None
-    try:
-        youtube = build("youtube", "v3", developerKey=os.environ["GOOGLE_API_KEY"])
-        response = youtube.videos().list(part="snippet", id=video_id).execute()
-        if "items" in response and len(response["items"]) > 0:
-            description = response["items"][0]["snippet"]["description"]
-            title = response["items"][0]["snippet"]["title"]
-            return title, description
-        else:
-            return None
-    except HttpError as e:
-        print(f"An HTTP error {e.resp.status} occurred: {e.content}")
-        return None
-
-
-def get_video_hashtags_from_description(description):
-    # The last line of the description is the hashtags
-    hashtags = description.splitlines()[-1]
-    return hashtags
-
-
-def create_notion_page(
-    database_name: str,
-    title: str,
-    text: str,
-    date: str,
-):
-    notion = Client(auth=os.environ["NOTION_API_KEY"])
-
-    # Get the database
-    query_filter = {"property": "object", "value": "database"}
-    response = notion.search(query=database_name, filter=query_filter).get("results")
-    database_id = response[0]["id"]
-
-    # Create the pages
-    _emoji = gpt_emoji(title)[0]
-    notion.pages.create(
-        parent={"database_id": database_id},
-        icon={
-            "type": "emoji",
-            "emoji": _emoji,
-        },
-        properties={
-            "Name": {
-                "title": [
-                    {
-                        "text": {
-                            "content": title,
-                        }
-                    }
-                ]
-            },
-            "Date": {
-                "date": {
-                    "start": date,
-                }
-            },
-            "Platform": {
-                "multi_select": [
-                    {"name": "YT Live"},
-                ]
-            },
-            "Status": {"status": {"name": "Planning"}},
-            "Type": {
-                "multi_select": [
-                    {"name": "Code"},
-                    {"name": "Paper"},
-                ]
-            },
-        },
-    )
-
-    # Sleep to let the page be created
-    time.sleep(5)
-
-    # Get the page
-    query_filter = {"property": "object", "value": "page"}
-    response = notion.search(query=title, filter=query_filter).get("results")
-    page_id = response[0]["id"]
-
-    # Add text to the page as a code block
-    notion.blocks.children.append(
-        block_id=page_id,
-        children=[
-            {
-                "object": "block",
-                "type": "code",
-                "code": {
-                    "language": "python",
-                    "rich_text": [
-                        {
-                            "type": "text",
-                            "text": {
-                                "content": text,
-                            },
-                        }
-                    ],
-                },
-            }
-        ],
-    )
 
 
 def gpt_text(
@@ -380,325 +207,12 @@ def gpt_image(
     return image_path
 
 
-def draw_text(
-    image_path=None,
-    output_path=None,
-    text="Hello World",
-    text_color=(255, 255, 255),
-    font_path=None,
-    font_size=72,
-    rectangle_color=(0, 0, 0),
-    rectangle_padding=20,
-    position_jitter=50,
-):
-    font = ImageFont.truetype(font_path, font_size)
-    # draw text on image
-    image = Image.open(image_path)
-    draw = ImageDraw.Draw(image)
-    text_width, text_height = draw.textsize(text, font=font)
-    # Calculate the position to center the text
-    x = (image.size[0] - text_width) / 2
-    y = (image.size[1] - text_height) / 2
-    # Jitter position of Text
-    x += random.randint(-position_jitter, position_jitter)
-    y += random.randint(-position_jitter, position_jitter)
-    # Draw a solid colored rectangle behind the text
-    rectangle_x1 = x - rectangle_padding
-    rectangle_y1 = y - rectangle_padding
-    rectangle_x2 = x + text_width + 2 * rectangle_padding
-    rectangle_y2 = y + text_height + 2 * rectangle_padding
-    draw.rectangle(
-        [rectangle_x1, rectangle_y1, rectangle_x2, rectangle_y2],
-        fill=rectangle_color,
-    )
-    draw.text((x, y), text, fill=text_color, font=font)
-    image.save(output_path)
-
-
-def resize_bg(
-    image=None,
-    output_path=None,
-    canvas_size=(1280, 720),
-):
-    image = Image.fromarray(image)
-    # Keep aspect ratio, resize width to fit
-    width, height = image.size
-    new_width = canvas_size[0]
-    new_height = int(height * new_width / width)
-    resized_image = image.resize((new_width, new_height), Image.ANTIALIAS)
-    # Create a new canvas with the desired size, transparent background
-    canvas = Image.new("RGBA", canvas_size, (0, 0, 0, 0))
-    # Center the resized image on the canvas
-    paste_position = (
-        int((canvas_size[0] - new_width) / 2),
-        int((canvas_size[1] - new_height) / 2),
-    )
-    canvas.paste(resized_image, paste_position)
-    canvas.save(output_path)
-
-
-def stack_fgbg(
-    fg_image=None,
-    mask_image=None,
-    bg_image=None,
-    bg_image_path=None,
-    output_path=None,
-    bg_size=(1280, 720),
-    fg_size=(420, 420),
-    position_jitter=50,
-):
-    fg_image = Image.fromarray(fg_image)
-    mask_image = Image.fromarray(mask_image)
-    if bg_image_path is not None:
-        bg_image = Image.open(bg_image_path)
-    else:
-        bg_image = Image.fromarray(bg_image)
-    # resize images
-    fg_image = fg_image.resize(fg_size)
-    mask_image = mask_image.resize(fg_size)
-    bg_image = bg_image.resize(bg_size)
-    x, y = random.choice(
-        [
-            # Lower left corner
-            (0, bg_size[1] - fg_size[1]),
-            # Lower right corner
-            (bg_size[0] - fg_size[0], bg_size[1] - fg_size[1]),
-        ]
-    )
-    # Jitter x and y position
-    x += random.randint(-position_jitter, position_jitter)
-    y += random.randint(-position_jitter, position_jitter)
-    # Final image
-    image_full = Image.new("RGBA", bg_size)
-    image_full.paste(fg_image, (x, y), mask_image)
-    final = Image.alpha_composite(bg_image, image_full)
-    final.save(output_path)
-
-
-def remove_bg(
-    image=None,
-    image_path=None,
-    output_path=None,
-):
-    # Temporary file location for image
-    if image is not None:
-        image_path = os.path.join(DATA_DIR, f"{uuid.uuid4()}.png")
-        image = Image.fromarray(image)
-        image.save(image_path)
-    # use replicate api to remove background
-    # need to have REPLICATE_API_KEY environment variable set
-    img_url = replicate.run(
-        "cjwbw/rembg:fb8af171cfa1616ddcf1242c093f9c46bcada5ad4cf6f2fbe8b81b330ec5c003",
-        input={"image": open(image_path, "rb")},
-    )
-    # save output image
-    image = Image.open(BytesIO(requests.get(img_url).content))
-    # Get the mask from image
-    image_mask = image.split()[-1]
-    if output_path is not None:
-        image_mask.save(output_path)
-    return image_mask
-
-
-def get_video_sentence_from_description(description):
-    # Split the text by the "Like" section
-    parts = description.split("Like 👍.")
-
-    # Get everything before the "Like" section
-    text_before_like = parts[0].strip()
-    return text_before_like
-
-
-def repo_blurb(url: str) -> str:
-    _ = find_repo(url)
-    if _:
-        usr, repo = _
-        blurb = f"""
-***** ⌨️ GitHub Repo *****
-{url}
-{usr} - {repo}
-*************************
-"""
-        return blurb
-    else:
-        return None
-
-
-def extract_images_from_pdf(
-    pdf_url,
-):
-    # Download the pdf from the url
-    pdf_path = os.path.join(DATA_DIR, f"{uuid.uuid4()}.pdf")
-    with open(pdf_path, "wb") as f:
-        f.write(requests.get(pdf_url).content)
-    # List of images
-    images = []
-    # Open the PDF
-    pdf = fitz.open(pdf_path)
-    for page_num in range(pdf.page_count):
-        page = pdf.load_page(page_num)
-        image_list = page.get_images(full=True)
-        for _, img in enumerate(image_list):
-            xref = img[0]
-            base_image = pdf.extract_image(xref)
-            image_bytes = base_image["image"]
-            # Convert image bytes to PIL Image
-            img = Image.open(BytesIO(image_bytes))
-            # Convert PIL Image to numpy array
-            images.append(img)
-    # Close the PDF
-    pdf.close()
-    return images
-
-
-def send_discord():
-    intents = discord.Intents.default()
-    intents.message_content = True
-    client = MyClient(intents=intents)
-    client.run(os.environ["DISCORD_API_KEY"])
-
-
-class MyClient(discord.Client):
-    async def on_ready(self):
-        print("Logged on as", self.user)
-
-    async def on_message(self, message):
-        # don't respond to ourselves
-        if message.author == self.user:
-            return
-
-        if message.content == "ping":
-            await message.channel.send("pong")
-
-
-def paper_blurb(paper: arxiv.Result) -> str:
-    title = paper.title
-    authors: List[str] = [author.name for author in paper.authors]
-    published = paper.published.strftime("%m/%d/%Y")
-    url = paper.pdf_url
-    blurb = f"""
------ 📝 ArXiV -----
-{url}
-{title}
-{published}
-{", ".join(authors)}
---------------------
-"""
-    return blurb
-
-
-def parse_textbox(text):
-    references = ""
-    hashtags = ""
-    title = ""
-    for url in gpt_text(
-        prompt=" ".join(
-            [
-                "You find urls in text and return a comma separated list of clean urls.",
-                "Do not explain, only return the list of urls. Here is the text: ",
-                text,
-            ],
-        ),
-    ).split(","):
-        if find_paper(url):
-            paper: arxiv.Result = find_paper(url)
-            references += paper_blurb(paper)
-            title += paper.title
-            if "#arxiv" not in hashtags:
-                hashtags += "#arxiv "
-        if find_repo(url):
-            references += repo_blurb(url)
-            if "#github" not in hashtags:
-                hashtags += "#github "
-    return references, hashtags, title
-
-
-def combine_texts(text, references, hashtags):
-    return f"{text}{references}{hashtags}"
-
-
-def generate_texts_title(title, max_tokens, temperature, model):
-    return gpt_text(
-        prompt=f"{title}",
-        system=" ".join(
-            [
-                "Modify the given title for a YouTube video.",
-                "Add or remove some words.",
-                "Do not explain, answer with the title only.",
-            ]
-        ),
-        temperature=temperature,
-        max_tokens=max_tokens,
-        model=model,
-    )
-
-
-def generate_texts_hashtags(title, hashtags, max_tokens, temperature, model):
-    return gpt_text(
-        prompt=hashtags,
-        system=" ".join(
-            [
-                "Modify the given hashtags for a YouTube video.",
-                "Add or remove some hashtags.",
-                "There must be exactly 5 hastags.",
-                "Do not explain, respond with the hashtags only.",
-                f"The YouTube video is titled {title}",
-            ]
-        ),
-        temperature=temperature,
-        max_tokens=max_tokens,
-        model=model,
-    )
-
-
-def generate_thumbnails(
-    fg_image: str,
-    fg_mask_image: str,
-    bg_image: str,
-    title: str,
-    font_color: str,
-    font_path: str,
-    font_size: int,
-    rect_color: str,
-    rect_padding: int,
-):
-    image_name = str(uuid.uuid4())
-    bg_image_path = os.path.join(DATA_DIR, f"{image_name}_bg.png")
-    resize_bg(
-        image=bg_image,
-        output_path=bg_image_path,
-    )
-    # Convert hex color to rgb
-    rect_color = tuple(int(rect_color.lstrip("#")[i : i + 2], 16) for i in (0, 2, 4))
-    font_color = tuple(int(font_color.lstrip("#")[i : i + 2], 16) for i in (0, 2, 4))
-    bg_image_text_path = os.path.join(DATA_DIR, f"{image_name}_text.png")
-    draw_text(
-        image_path=bg_image_path,
-        output_path=bg_image_text_path,
-        text=title,
-        text_color=font_color,
-        font_size=font_size,
-        font_path=font_path.name,
-        rectangle_color=rect_color,
-        rectangle_padding=rect_padding,
-    )
-    image_path = os.path.join(DATA_DIR, f"{image_name}_final.png")
-    stack_fgbg(
-        fg_image=fg_image,
-        mask_image=fg_mask_image,
-        bg_image_path=bg_image_text_path,
-        output_path=image_path,
-    )
-    return image_path
-
-
 # Define the main GradIO UI
 with gr.Blocks() as demo:
     gr.Markdown(
         """
-# fren 📺
+# fren 🤖
 
-This AI tool helps you create YouTube videos. Start by finding a cool paper [Twitter List](https://twitter.com/i/lists/1653485531546767361), [PapersWithCode](https://paperswithcode.com/), [Reddit Feed](https://www.reddit.com/user/deephugs/m/ml/), [Arxiv Sanity](http://www.arxiv-sanity.com/)
 """
     )
     log.info("Starting GradIO Frontend ...")
@@ -909,28 +423,6 @@ This AI tool helps you create YouTube videos. Start by finding a cool paper [Twi
             ],
             outputs=[gr_combined_image],
         )
-    with gr.Tab("Notion"):
-        notion_database_textbox = gr.Textbox(
-            label="Notion Database Name",
-            lines=1,
-            value="Content Calendar",
-        )
-        gr_planned_date_textbox = gr.Textbox(
-            label="Planned Date",
-            lines=1,
-            value=str(datetime.datetime.now().date()),
-        )
-        gr_export_notion_button = gr.Button(label="Export to Notion")
-        gr_export_notion_button.click(
-            create_notion_page,
-            inputs=[
-                notion_database_textbox,
-                gr_texts_title_textbox,
-                gr_texts_textbox,
-                gr_planned_date_textbox,
-            ],
-        )
-
     with gr.Tab("Keys"):
         openai_api_key_textbox = gr.Textbox(
             placeholder="Paste your OpenAI API key here",
@@ -943,28 +435,6 @@ This AI tool helps you create YouTube videos. Start by finding a cool paper [Twi
             inputs=[openai_api_key_textbox],
         )
         set_openai_key()
-        replicate_api_key_textbox = gr.Textbox(
-            placeholder="Paste your Replicate API key here",
-            show_label=False,
-            lines=1,
-            type="password",
-        )
-        replicate_api_key_textbox.change(
-            set_replicate_key,
-            inputs=[replicate_api_key_textbox],
-        )
-        set_replicate_key()
-        notion_api_key_textbox = gr.Textbox(
-            placeholder="Paste your Notion API key here",
-            show_label=False,
-            lines=1,
-            type="password",
-        )
-        notion_api_key_textbox.change(
-            set_notion_key,
-            inputs=[notion_api_key_textbox],
-        )
-        set_notion_key()
         huggingface_api_key_textbox = gr.Textbox(
             placeholder="Paste your HuggingFace API key here",
             show_label=False,
