@@ -9,7 +9,6 @@ from typing import Dict, List, Union
 
 import gradio as gr
 import torch.nn.functional as F
-import openai
 import requests
 from PIL import Image
 
@@ -45,6 +44,7 @@ def set_openai_key(key=None):
             log.warning("OpenAI API key not found.")
             return
     os.environ["OPENAI_API_KEY"] = key
+    import openai
     openai.api_key = key
     log.info("OpenAI API key set.")
 
@@ -59,6 +59,68 @@ def set_huggingface_key(key=None):
     os.environ["HUGGINGFACE_API_KEY"] = key
     log.info("HuggingFace API key set.")
 
+def set_palm_key(key=None):
+    if key is None:
+        try:
+            with open(os.path.join(KEYS_DIR, "palm.txt"), "r") as f:
+                key = f.read()
+        except FileNotFoundError:
+            log.warning("Palm API key not found.")
+            return
+    os.environ["PALM_API_KEY"] = key
+    log.info("Palm API key set.")
+
+def load_imagebind():
+    pass
+
+def clear_gpu():
+    pass
+
+def palm_text():
+    """https://developers.generativeai.google/tutorials/text_quickstart"""
+    import google.generativeai as palm
+    models = [m for m in palm.list_models() if 'generateText' in m.supported_generation_methods]
+    model = models[0].name
+    print(model)
+
+
+    prompt = """
+    I have three houses, each with three cats.
+    each cat owns 4 mittens, and a hat. Each mitten was
+    knit from 7m of yarn, each hat from 4m.
+    How much yarn was needed to make all the items?
+
+    Think about it step by step, and show your work.
+    """
+
+    completion = palm.generate_text(
+        model=model,
+        prompt=prompt,
+        # The maximum length of the response
+        max_output_tokens=800,
+    )
+
+    return completion.result
+
+def palm_chat():
+    """https://developers.generativeai.google/tutorials/chat_quickstart"""
+    import google.generativeai as palm
+
+    # An array of "ideal" interactions between the user and the model
+    examples = [
+        ("What's up?", # A hypothetical user input
+        "What isn't up?? The sun rose another day, the world is bright, anything is possible! ☀️" # A hypothetical model response
+        ),
+        ("I'm kind of bored",
+        "How can you be bored when there are so many fun, exciting, beautiful experiences to be had in the world? 🌈")
+    ]
+
+    response = palm.chat(
+    context="Be a motivational coach who's very inspiring",
+    examples=examples,
+    messages="I'm too tired to go the gym today")
+
+    return response.last
 
 def imagebind(text, audio, image):
     sys.path.append('/home/oop/dev/ImageBind')
@@ -118,6 +180,7 @@ def gpt_text(
     max_tokens: int = 32,
     stop: List[str] = ["\n"],
 ):
+    import openai
     if isinstance(prompt, str):
         prompt = [{"role": "user", "content": prompt}]
     elif prompt is None:
@@ -193,6 +256,7 @@ def gpt_image(
     n: int = 1,
     image_size="512x512",
 ):
+    import openai
     log.debug(f"Image call to GPT with: \n {prompt}")
     response = openai.Image.create(
         prompt=prompt,
