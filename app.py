@@ -4,6 +4,7 @@ import sys
 import uuid
 import numpy as np
 from io import BytesIO
+import gc
 import torch
 from typing import Dict, List, Union
 
@@ -68,30 +69,16 @@ def set_palm_key(key=None):
             log.warning("Palm API key not found.")
             return
     os.environ["PALM_API_KEY"] = key
+    import google.generativeai as genai
+    genai.configure(api_key=key)
     log.info("Palm API key set.")
 
-def load_imagebind():
-    pass
-
-def clear_gpu():
-    pass
-
-def palm_text():
+def palm_text(prompt):
     """https://developers.generativeai.google/tutorials/text_quickstart"""
     import google.generativeai as palm
     models = [m for m in palm.list_models() if 'generateText' in m.supported_generation_methods]
     model = models[0].name
     print(model)
-
-
-    prompt = """
-    I have three houses, each with three cats.
-    each cat owns 4 mittens, and a hat. Each mitten was
-    knit from 7m of yarn, each hat from 4m.
-    How much yarn was needed to make all the items?
-
-    Think about it step by step, and show your work.
-    """
 
     completion = palm.generate_text(
         model=model,
@@ -102,25 +89,34 @@ def palm_text():
 
     return completion.result
 
-def palm_chat():
+def palm_chat(prompt, context, examples=None):
     """https://developers.generativeai.google/tutorials/chat_quickstart"""
     import google.generativeai as palm
 
-    # An array of "ideal" interactions between the user and the model
-    examples = [
-        ("What's up?", # A hypothetical user input
-        "What isn't up?? The sun rose another day, the world is bright, anything is possible! ☀️" # A hypothetical model response
-        ),
-        ("I'm kind of bored",
-        "How can you be bored when there are so many fun, exciting, beautiful experiences to be had in the world? 🌈")
-    ]
+    # # An array of "ideal" interactions between the user and the model
+    # examples = [
+    #     ("What's up?", # A hypothetical user input
+    #     "What isn't up?? The sun rose another day, the world is bright, anything is possible! ☀️" # A hypothetical model response
+    #     ),
+    #     ("I'm kind of bored",
+    #     "How can you be bored when there are so many fun, exciting, beautiful experiences to be had in the world? 🌈")
+    # ]
 
     response = palm.chat(
-    context="Be a motivational coach who's very inspiring",
+    context=context,
     examples=examples,
-    messages="I'm too tired to go the gym today")
+    messages=prompt,
+    )
 
     return response.last
+
+def clear_gpu():
+    log.info("Clearing GPU memory")
+    torch.cuda.empty_cache()
+    gc.collect()
+
+def load_imagebind():
+    pass
 
 def imagebind(text, audio, image):
     sys.path.append('/home/oop/dev/ImageBind')
@@ -170,6 +166,10 @@ def imagebind(text, audio, image):
 
     return f"Vision x Text: {vision_text}\nAudio x Text: {audio_text}\nVision x Audio: {vision_audio}"
 
+
+def gpt_chat(context, prompt, examples=None):
+    # TODO: examples converts tuples into gpt dict format
+    return gpt_text(prompt, system=context)
 
 
 def gpt_text(
@@ -275,7 +275,7 @@ def gpt_image(
 # Define the main GradIO UI
 with gr.Blocks() as demo:
     gr.Markdown(
-        """
+"""
 # fren 🤖
 
 """
@@ -283,71 +283,89 @@ with gr.Blocks() as demo:
     log.info("Starting GradIO Frontend ...")
     texts_references = gr.State(value="")
     with gr.Tab("Texts"):
-        gr_text = gr.Textbox(
-            placeholder="Paste text here",
-            show_label=False,
-            lines=1,
-            value="dog",
-        )
-        gr_audio = gr.Audio(
-            label="Record audio into conversation",
-            source="microphone",
-            # format="wav",
-            # type="numpy",
-        )
-        with gr.Accordion(
-            label="GPT Settings",
-            open=False,
-        ):
-            gr_model = gr.Dropdown(
-                choices=["gpt-3.5-turbo", "gpt-4"],
-                label="GPT Model behind conversation",
-                value="gpt-3.5-turbo",
-            )
-            gr_max_tokens = gr.Slider(
-                minimum=1,
-                maximum=300,
-                value=50,
-                label="max tokens",
-                step=1,
-            )
-            gr_temperature = gr.Slider(
-                minimum=0.0,
-                maximum=1.0,
-                value=0.7,
-                label="Temperature",
-            )
         with gr.Row():
-            gr_image = gr.Image(
-                label="Image",
-                image_mode="RGB",
-                # value="/home/tren/Downloads/cat.png",
-            )
             with gr.Column():
-                gr_generate_button = gr.Button(value="Generate Image")
-                gr_prompt_textbox = gr.Textbox(
-                    placeholder="Image Prompt",
+                gr_text_context_gpt = gr.Textbox(
+                    placeholder="GPT context",
                     show_label=False,
-                    lines=1,
-                    value="portrait of a blue eyed white bengal cat",
                 )
-            gr_generate_button.click(
-                gpt_image,
-                inputs=[gr_prompt_textbox],
-                outputs=[gr_image],
+                gr_text_prompt_gpt = gr.Textbox(
+                    placeholder="GPT prompt",
+                    show_label=False,
+                )
+                gr_button_gpt = gr.Button(value="Chat")
+                gr_text_output_gpt = gr.Textbox(
+                    placeholder="GPT output",
+                    show_label=False,
+                )
+                gr_button_gpt.click(
+                    gpt_chat,
+                    inputs=[gr_text_prompt_gpt, gr_text_context_gpt],
+                    outputs=[gr_text_output_gpt],
+                )
+            with gr.Column():
+                gr_text_context_palm = gr.Textbox(
+                    placeholder="PaLM context",
+                    show_label=False,
+                )
+                gr_text_prompt_palm = gr.Textbox(
+                    placeholder="PaLM prompt",
+                    show_label=False,
+                )
+                gr_button_palm = gr.Button(value="Chat")
+                gr_text_output_palm = gr.Textbox(
+                    placeholder="PaLM output",
+                    show_label=False,
+                )
+                gr_button_palm.click(
+                    palm_chat,
+                    inputs=[gr_text_prompt_palm, gr_text_context_palm],
+                    outputs=[gr_text_output_palm],
+                )
+
+    with gr.Tab("ImageBind"):
+        gr_image = gr.Image(
+            label="Image",
+            image_mode="RGB",
+            # value="/home/tren/Downloads/cat.png",
+        )
+        with gr.Column():
+            gr_generate_button = gr.Button(value="Generate Image")
+            gr_prompt_textbox = gr.Textbox(
+                placeholder="Image Prompt",
+                show_label=False,
+                lines=1,
+                value="",
             )
+        gr_generate_button.click(
+            gpt_image,
+            inputs=[gr_prompt_textbox],
+            outputs=[gr_image],
+        )
+        with gr.Column():
+            gr_audio = gr.Audio(
+                label="Audio",
+                source="microphone",
+                # format="wav",
+                # type="numpy",
+            )
+            gr_text_input = gr.Textbox(
+                placeholder="Text",
+                show_label=False,
+                lines=1,
+                value="",
+            )
+            gr_bind_button = gr.Button(value="ImageBind")
         gr_text_output = gr.Textbox(
             placeholder="Output",
             show_label=False,
             value="",
         )
-        with gr.Row():
-            gr_bind_button = gr.Button(value="Bind Inputs")
-            gr_bind_button.click(
-                imagebind,
-                inputs=[gr_text, gr_audio, gr_image],
-                outputs=[gr_text_output],
-            )
+        gr_bind_button.click(
+            imagebind,
+            inputs=[gr_text_input, gr_audio, gr_image],
+            outputs=[gr_text_output],
+        )
             
     with gr.Tab("Keys"):
         openai_api_key_textbox = gr.Textbox(
@@ -361,6 +379,28 @@ with gr.Blocks() as demo:
             inputs=[openai_api_key_textbox],
         )
         set_openai_key()
+        with gr.Accordion(
+                    label="GPT Settings",
+                    open=False,
+                ):
+                    gr_model = gr.Dropdown(
+                        choices=["gpt-3.5-turbo", "gpt-4"],
+                        label="GPT Model behind conversation",
+                        value="gpt-3.5-turbo",
+                    )
+                    gr_max_tokens = gr.Slider(
+                        minimum=1,
+                        maximum=300,
+                        value=50,
+                        label="max tokens",
+                        step=1,
+                    )
+                    gr_temperature = gr.Slider(
+                        minimum=0.0,
+                        maximum=1.0,
+                        value=0.7,
+                        label="Temperature",
+                    )
         huggingface_api_key_textbox = gr.Textbox(
             placeholder="Paste your HuggingFace API key here",
             show_label=False,
@@ -372,6 +412,17 @@ with gr.Blocks() as demo:
             inputs=[huggingface_api_key_textbox],
         )
         set_huggingface_key()
+        palm_api_key_textbox = gr.Textbox(
+            placeholder="Paste your Palm API key here",
+            show_label=False,
+            lines=1,
+            type="password",
+        )
+        palm_api_key_textbox.change(
+            set_palm_key,
+            inputs=[palm_api_key_textbox],
+        )
+        set_palm_key()
 
     gr.HTML(
         """
@@ -387,4 +438,3 @@ with gr.Blocks() as demo:
 
 if __name__ == "__main__":
     demo.launch()
-    # imagebind()
