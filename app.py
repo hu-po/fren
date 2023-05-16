@@ -76,6 +76,7 @@ def imagebind(text, audio, image):
     # Instantiate model!
     model = imagebind_model.imagebind_huge(pretrained=True)
     model.eval()
+    print(model)
     model.to(device)
 
     with torch.no_grad():
