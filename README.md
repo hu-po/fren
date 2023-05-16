@@ -1,7 +1,6 @@
 # fren
 
-AI companion
-
+PaLM + GPT
 
 ## Setup
 
@@ -23,7 +22,7 @@ This repo was built live on YouTube, you can find the playlist here:
 
 ```
 @misc{hupo2023tubegpt,
-  title={Fren: AI companion},
+  title={fren},
   author={Hugo Ponte},
   year={2023},
   url={https://github.com/hu-po/fren}
