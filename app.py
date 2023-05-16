@@ -2,11 +2,13 @@ import logging
 import os
 import sys
 import uuid
+import numpy as np
 from io import BytesIO
 import torch
 from typing import Dict, List, Union
 
 import gradio as gr
+import torch.nn.functional as F
 import openai
 import requests
 from PIL import Image
@@ -58,18 +60,53 @@ def set_huggingface_key(key=None):
     log.info("HuggingFace API key set.")
 
 
-def imagebind():
+def imagebind(text, audio, image):
     sys.path.append('/home/oop/dev/ImageBind')
+    import data
     from models import imagebind_model
-    from models.imagebind_model import ModalityType
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
-    # Instantiate model
+    text_list=[text]
+    inputs = {
+        "text": data.load_and_transform_text(text_list, device),
+        "vision": data.load_and_transform_gradio_image(image, device),
+        "audio": data.load_and_transform_gradio_audio(audio[0], audio[1], device),
+    }
+
+    # Instantiate model!
     model = imagebind_model.imagebind_huge(pretrained=True)
     model.eval()
     model.to(device)
 
-    pass
+    with torch.no_grad():
+        embeddings = model(inputs)
+
+
+    # vision_text = torch.softmax(embeddings["vision"] @ embeddings["text"].T, dim=-1)
+    # audio_text = torch.softmax(embeddings["audio"] @ embeddings["text"].T, dim=-1)
+    # vision_audio = torch.softmax(embeddings["vision"] @ embeddings["audio"].T, dim=-1)
+
+    vision = embeddings["vision"]
+    audio = embeddings["audio"]
+    text = embeddings["text"]
+
+    if vision.shape[0] == 1:
+        vision_text = F.cosine_similarity(vision, text)
+    else:
+        vision_text = torch.softmax(vision @ text.T, dim=-1)
+
+    if audio.shape[0] == 1:
+        audio_text = F.cosine_similarity(audio, text)
+    else:
+        audio_text = torch.softmax(audio @ text.T, dim=-1)
+
+    if vision.shape[0] == 1 and audio.shape[0] == 1:
+        vision_audio = F.cosine_similarity(vision, audio)
+    else:
+        vision_audio = torch.softmax(vision @ audio.T, dim=-1)
+
+    return f"Vision x Text: {vision_text}\nAudio x Text: {audio_text}\nVision x Audio: {vision_audio}"
+
 
 
 def gpt_text(
@@ -181,10 +218,17 @@ with gr.Blocks() as demo:
     log.info("Starting GradIO Frontend ...")
     texts_references = gr.State(value="")
     with gr.Tab("Texts"):
-        gr_input_textbox = gr.Textbox(
-            placeholder="Paste text here (arxiv, github, ...)",
+        gr_text = gr.Textbox(
+            placeholder="Paste text here",
             show_label=False,
             lines=1,
+            value="dog",
+        )
+        gr_audio = gr.Audio(
+            label="Record audio into conversation",
+            source="microphone",
+            # format="wav",
+            # type="numpy",
         )
         with gr.Accordion(
             label="GPT Settings",
@@ -208,25 +252,38 @@ with gr.Blocks() as demo:
                 value=0.7,
                 label="Temperature",
             )
-        with gr.Accordion(label="Generate Image w/ OpenAI Image", open=False):
-            with gr.Row():
-                gr_fg_image = gr.Image(
-                    label="Foreground",
-                    image_mode="RGB",
-                )
-                with gr.Column():
-                    gr_generate_fg_button = gr.Button(value="Generate Foreground")
-                    gr_fg_prompt_textbox = gr.Textbox(
-                        placeholder="Foreground Prompt",
-                        show_label=False,
-                        lines=1,
-                        value="portrait of a blue eyed white bengal cat",
-                    )
-            gr_generate_fg_button.click(
-                gpt_image,
-                inputs=[gr_fg_prompt_textbox],
-                outputs=[gr_fg_image],
+        with gr.Row():
+            gr_image = gr.Image(
+                label="Image",
+                image_mode="RGB",
+                # value="/home/tren/Downloads/cat.png",
             )
+            with gr.Column():
+                gr_generate_button = gr.Button(value="Generate Image")
+                gr_prompt_textbox = gr.Textbox(
+                    placeholder="Image Prompt",
+                    show_label=False,
+                    lines=1,
+                    value="portrait of a blue eyed white bengal cat",
+                )
+            gr_generate_button.click(
+                gpt_image,
+                inputs=[gr_prompt_textbox],
+                outputs=[gr_image],
+            )
+        gr_text_output = gr.Textbox(
+            placeholder="Output",
+            show_label=False,
+            value="",
+        )
+        with gr.Row():
+            gr_bind_button = gr.Button(value="Bind Inputs")
+            gr_bind_button.click(
+                imagebind,
+                inputs=[gr_text, gr_audio, gr_image],
+                outputs=[gr_text_output],
+            )
+            
     with gr.Tab("Keys"):
         openai_api_key_textbox = gr.Textbox(
             placeholder="Paste your OpenAI API key here",
@@ -264,5 +321,5 @@ with gr.Blocks() as demo:
     )
 
 if __name__ == "__main__":
-    # demo.launch()
-    imagebind()
+    demo.launch()
+    # imagebind()
