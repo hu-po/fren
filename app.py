@@ -98,7 +98,7 @@ def palm_chat(prompt, context, examples=None):
     #     ("What's up?", # A hypothetical user input
     #     "What isn't up?? The sun rose another day, the world is bright, anything is possible! ☀️" # A hypothetical model response
     #     ),
-    #     ("I'm kind of bored",
+    #     ("I'm kind of bored",z
     #     "How can you be bored when there are so many fun, exciting, beautiful experiences to be had in the world? 🌈")
     # ]
 
@@ -139,11 +139,6 @@ def imagebind(text, audio, image):
 
     with torch.no_grad():
         embeddings = model(inputs)
-
-
-    # vision_text = torch.softmax(embeddings["vision"] @ embeddings["text"].T, dim=-1)
-    # audio_text = torch.softmax(embeddings["audio"] @ embeddings["text"].T, dim=-1)
-    # vision_audio = torch.softmax(embeddings["vision"] @ embeddings["audio"].T, dim=-1)
 
     vision = embeddings["vision"]
     audio = embeddings["audio"]
@@ -282,6 +277,12 @@ with gr.Blocks() as demo:
     )
     log.info("Starting GradIO Frontend ...")
     texts_references = gr.State(value="")
+    gr_button_clear_gpu = gr.Button(value="Clear GPU")
+    gr_button_clear_gpu.click(
+        clear_gpu,
+        inputs=[],
+        outputs=[],
+    )
     with gr.Tab("Texts"):
         with gr.Row():
             with gr.Column():
